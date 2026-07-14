@@ -1,0 +1,189 @@
+openapi: 3.0.3
+info:
+  title: Copilot GRC Multi-Cloud API
+  version: "0.2.0"
+  description: >
+    Reflects schema.py v1.1.0. Internal-only models (NormalizedResource) are
+    intentionally not exposed here — the API surface only covers shapes a
+    frontend or external client actually consumes.
+paths:
+  /findings:
+    get:
+      summary: List findings, optionally filtered by cloud, domain, or severity
+      parameters:
+        - name: cloud_provider
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/CloudProvider" }
+        - name: domain
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/Domain" }
+        - name: severity
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/Severity" }
+      responses:
+        "200":
+          description: A list of findings
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Finding" }
+
+  /findings/{finding_id}:
+    get:
+      summary: Get a single finding by ID
+      parameters:
+        - name: finding_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The finding
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Finding" }
+        "404":
+          description: No finding with that ID
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /findings/{finding_id}/enriched:
+    get:
+      summary: Get the AI copilot's citation-verified explanation for a finding
+      parameters:
+        - name: finding_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The enriched finding
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EnrichedFinding" }
+        "404":
+          description: No finding with that ID
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /findings/{finding_id}/risk:
+    get:
+      summary: Get the estimated financial exposure (MAD) for a finding
+      parameters:
+        - name: finding_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The financial risk assessment
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FinancialRiskAssessment" }
+        "404":
+          description: No finding with that ID, or no assessment computed yet
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /score:
+    get:
+      summary: Get the current aggregated compliance score
+      responses:
+        "200":
+          description: The compliance score
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComplianceScore" }
+
+components:
+  schemas:
+    CloudProvider:
+      type: string
+      enum: [aws, azure, gcp]
+
+    Severity:
+      type: string
+      enum: [low, medium, high, critical]
+
+    Domain:
+      type: string
+      enum: [iam, network, encryption, logging, storage]
+
+    FindingStatus:
+      type: string
+      enum: [open, resolved, dismissed]
+
+    Finding:
+      type: object
+      required: [cloud_provider, resource_id, resource_type, rule_id, domain, severity, description, status, detected_at]
+      properties:
+        id: { type: string, format: uuid, nullable: true }
+        cloud_provider: { $ref: "#/components/schemas/CloudProvider" }
+        resource_id: { type: string }
+        resource_type: { type: string }
+        rule_id: { type: string }
+        domain: { $ref: "#/components/schemas/Domain" }
+        severity: { $ref: "#/components/schemas/Severity" }
+        description: { type: string, maxLength: 2000 }
+        status: { $ref: "#/components/schemas/FindingStatus" }
+        detected_at: { type: string, format: date-time }
+
+    RegulatoryCitation:
+      type: object
+      required: [framework, article_or_control, excerpt, source_document_id]
+      properties:
+        framework: { type: string }
+        article_or_control: { type: string }
+        excerpt: { type: string, maxLength: 3000 }
+        source_document_id: { type: string }
+
+    EnrichedFinding:
+      type: object
+      required: [finding, explanation, citations, citation_verified]
+      properties:
+        finding: { $ref: "#/components/schemas/Finding" }
+        explanation: { type: string, maxLength: 5000 }
+        citations:
+          type: array
+          items: { $ref: "#/components/schemas/RegulatoryCitation" }
+        citation_verified: { type: boolean }
+
+    FinancialRiskAssessment:
+      type: object
+      required: [finding_id, estimated_min_mad, estimated_max_mad, rationale]
+      properties:
+        finding_id: { type: string, format: uuid }
+        estimated_min_mad: { type: number, minimum: 0 }
+        estimated_max_mad: { type: number, minimum: 0 }
+        rationale: { type: string, maxLength: 2000 }
+        citation:
+          allOf: [{ $ref: "#/components/schemas/RegulatoryCitation" }]
+          nullable: true
+
+    ComplianceScore:
+      type: object
+      required: [overall_score, total_findings, critical_findings, computed_at]
+      properties:
+        overall_score: { type: number, minimum: 0, maximum: 100 }
+        score_by_domain:
+          type: object
+          additionalProperties: { type: number }
+        score_by_cloud:
+          type: object
+          additionalProperties: { type: number }
+        total_findings: { type: integer, minimum: 0 }
+        critical_findings: { type: integer, minimum: 0 }
+        computed_at: { type: string, format: date-time }
+
+    ErrorResponse:
+      type: object
+      required: [detail]
+      properties:
+        detail: { type: string }
